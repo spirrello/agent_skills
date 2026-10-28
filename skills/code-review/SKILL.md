@@ -39,7 +39,7 @@ Before the first `glab` call, load the token without echoing it:
 
 ```bash
 export GITLAB_TOKEN="$(cat ~/.gitlab_configuration/ai)"
-export GITLAB_HOST="FILLOUT"
+export GITLAB_HOST="GIT_SERVER"
 ```
 
 Do not print, log, or write the token anywhere.
@@ -79,6 +79,16 @@ glab mr diff <iid> -R <repo> --raw --color=never
 - When surrounding context is needed, fetch the file at the MR head sha:
   `glab api "projects/<url-encoded-project>/repository/files/<url-encoded-path>/raw?ref=<sha>"`.
   If the project is checked out locally, read local files instead.
+- Terraform/OpenTofu: resolve remote module `source`s — variable names alone
+  don't reveal what a flag flip provisions. `git::git@GIT_SERVER:/<group>/
+  <project>.git//<subdir>?ref=<ref>` maps to `glab api "projects/<url-encoded>/
+  repository/tree?path=<subdir>&ref=<ref>"` to list files, then fetch each
+  `*.tf` via `.../files/<url-encoded-path>/raw?ref=<ref>` (or download the
+  subdir at once with `repository/archive.tar.gz?sha=<ref>&path=<subdir>`).
+  Read the module at the pinned `?ref=`; if there is no `?ref=`, use the
+  repo's `default_branch` (`glab api projects/<url-encoded>`) — unpinned
+  sources are the convention here: resolve them for reading, but do NOT flag
+  them in the report. Local `./`/`../` sources: read directly.
 - Skip noise: generated code, vendored files, `.lock`/lockfile churn (but do
   scan lockfiles for unexpected dependency additions). Don't review whitespace-only diffs.
 
@@ -128,9 +138,17 @@ error handling, tests). Multiple checklists can apply to one MR.
   reaching across trust boundaries.
 - IAM/security: `Action: "*"`, `Resource: "*"`, `0.0.0.0/0` ingress, public
   buckets/ACLs, `publicly_accessible = true`, unencrypted storage.
-- Versioning: unpinned providers/modules; module `ref` pointing at a branch
-  instead of a tag/sha; `.terraform.lock.hcl` removed or regenerated
-  unexpectedly.
+- Versioning: unpinned providers; `.terraform.lock.hcl` removed or
+  regenerated unexpectedly. Module `source`s are intentionally not pinned to
+  a `?ref=`/tag — do NOT flag unpinned module sources.
+- Upstream module review: when a changed variable/argument is passed into a
+  module (local or remote), trace it into the module's resource blocks —
+  don't assess impact from names/descriptions alone. Look for `count`/
+  `for_each` gates toggled by the flag, `load_balancer`/listener-rule/DNS
+  associations that force ECS redeploys or record replacement, `moved`
+  blocks needed on re-keys, input `validation` blocks and preconditions
+  (e.g. "requires X = true"), and defaults the module supplies when the
+  variable is left unset.
 - Correctness traps: `count`/`for_each` changes that re-key and recreate
   resources (was a `moved` block needed?); `data` sources that drift
   (`most_recent = true`); defaults that leak env-specific config into other
